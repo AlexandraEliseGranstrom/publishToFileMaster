@@ -1,0 +1,20 @@
+@import "~@fluentui/react/dist/sass/References.scss";
+
+.projectInformation {
+  overflow: hidden;
+  padding: 1em;
+  color: "[theme:bodyText, default: #323130]";
+  color: var(--bodyText);
+  &.teams {
+    font-family: $ms-font-family-fallbacks;
+  }
+}
+
+.projectInfoForm {
+  h2 {
+    font-weight: 600;
+  }
+  p {
+    margin-block-start: 0.5em;
+  }
+}
