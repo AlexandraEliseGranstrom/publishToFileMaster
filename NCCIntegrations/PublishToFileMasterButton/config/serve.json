@@ -1,0 +1,31 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/spfx-serve.schema.json",
+  "port": 4321,
+  "https": true,
+  "serveConfigurations": {
+    "default": {
+      "pageUrl": "https://wmlps.sharepoint.com/sites/Notiser/Copy%20to%20file%20master/Forms/AllItems.aspx",
+      "customActions": {
+        "99747211-91dc-4ca7-a6c4-0d274e1f068c": {
+          "location": "ClientSideExtension.ListViewCommandSet.CommandBar",
+          "properties": {
+            "sampleTextOne": "One item is selected in the list",
+            "sampleTextTwo": "This command is always visible."
+          }
+        }
+      }
+    },
+    "publishToFileMaster": {
+      "pageUrl": "https://wmlps.sharepoint.com/sites/Notiser/Copy%20to%20file%20master/Forms/AllItems.aspx",
+      "customActions": {
+        "99747211-91dc-4ca7-a6c4-0d274e1f068c": {
+          "location": "ClientSideExtension.ListViewCommandSet.CommandBar",
+          "properties": {
+            "sampleTextOne": "One item is selected in the list",
+            "sampleTextTwo": "This command is always visible."
+          }
+        }
+      }
+    }
+  }
+}
