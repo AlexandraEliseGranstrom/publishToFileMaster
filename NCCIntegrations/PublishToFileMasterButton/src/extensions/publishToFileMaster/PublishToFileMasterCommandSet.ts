@@ -7,9 +7,8 @@ import {
   type ListViewStateChangedEventArgs,
 } from "@microsoft/sp-listview-extensibility";
 import axios from "axios";
-// import { IUpdateModal, UpdateModal } from "./components/UpdateModal";
-// import * as ReactDom from "react-dom";
-// import * as React from "react";
+import { SPHttpClient, SPHttpClientResponse } from "@microsoft/sp-http";
+import * as strings from "PublishToFileMasterCommandSetStrings";
 
 export interface IPublishToFileMasterCommandSetProperties {
   sampleTextOne: string;
@@ -19,9 +18,8 @@ export interface IPublishToFileMasterCommandSetProperties {
 const LOG_SOURCE: string = "PublishToFileMasterCommandSet";
 
 export default class PublishToFileMasterCommandSet extends BaseListViewCommandSet<IPublishToFileMasterCommandSetProperties> {
-  private panelPlaceHolder: HTMLDivElement | null = null;
   private siteUrl: string;
-  private listPath: string | undefined;
+  private listTitle: string | undefined;
 
   @override
   public onInit(): Promise<void> {
@@ -29,17 +27,13 @@ export default class PublishToFileMasterCommandSet extends BaseListViewCommandSe
 
     const compareOneCommand: Command = this.tryGetCommand("COMMAND_1");
     compareOneCommand.visible = false;
-
+    compareOneCommand.title = strings.PublishToFileMaster;
     this.context.listView.listViewStateChangedEvent.add(
       this,
       this._onListViewStateChanged
     );
     this.siteUrl = this.context.pageContext.site.absoluteUrl;
-    this.listPath = this.context.pageContext.list?.serverRelativeUrl;
-    this.panelPlaceHolder = document.body.appendChild(
-      document.createElement("div")
-    );
-    console.log(this.panelPlaceHolder);
+    this.listTitle = this.context.listView.list?.title;
 
     return Promise.resolve();
   }
@@ -52,20 +46,26 @@ export default class PublishToFileMasterCommandSet extends BaseListViewCommandSe
         // eslint-disable-next-line no-case-declarations
         const selectedRows = this.context.listView.selectedRows;
 
-        // Check if any rows are selected
         if (selectedRows && selectedRows.length > 0) {
-          // Initialize an array to store list IDs
+          const missingDocumentType: string[] = [];
           const listIds: string[] = [];
           const itemTitles: string[] = [];
 
-          // Iterate through selected rows to get the list IDs
           selectedRows.forEach((listItem) => {
-            // Add SharePoint list item ID to the array
             itemTitles.push(listItem.getValueByName("FileRef"));
             listIds.push(listItem.getValueByName("ID"));
+            //help me here
+            const docType = listItem.getValueByName("DocumentType");
+            if (!docType) {
+              missingDocumentType.push(listItem.getValueByName("ID"));
+            }
           });
 
-          await this.save(itemTitles, listIds);
+          if (missingDocumentType.length > 0) {
+            alert(`You need to fill in document type to publish to FileMaster`);
+          } else {
+            await this.save(itemTitles, listIds);
+          }
         }
 
         break;
@@ -78,127 +78,189 @@ export default class PublishToFileMasterCommandSet extends BaseListViewCommandSe
     itemTitles: string[],
     itemIds: string[]
   ): Promise<void> => {
-    let userPreference;
-
     // Extracting titles from full file paths using regex
+
     const extractedTitles = itemTitles.map((title) => {
-      const match = title.match(/\/([^/]+)$/); // Regex to extract filename from path
-      return match ? match[1] : title; // If match found, return the filename, otherwise return the original title
+      const match = title.match(/\/([^/]+)$/);
+      return match ? match[1] : title;
     });
 
-    // Constructing the bullet list of item titles
     const itemTitleList = extractedTitles
       .map((title) => `- ${title}`)
       .join("\n");
 
     if (
       confirm(
-        `Do you want to publish the following file/-s to NCC FileMaster?\n\n${itemTitleList}`
+        `${strings.DoYouWannaPublishFilesToFileMaser}\n\n${itemTitleList}`
       ) === true
     ) {
-      await this._updateListItems(itemIds);
-      userPreference = "Data saved successfully!";
-    } else {
-      userPreference = "Save Canceled!";
+      const noErrorsUpdatingMetadata = await this._updateListItemMetadata(
+        itemIds
+      );
+      const noErrorsUpdatingVersions = await this._updateListItemVersions(
+        itemIds
+      );
+      if (!noErrorsUpdatingMetadata || !noErrorsUpdatingVersions) {
+        alert(strings.ProblemPublishingToFileMaster);
+      } else {
+        window.location.reload();
+      }
     }
-    console.log(userPreference);
-    console.log(this.siteUrl);
-    console.log(this.listPath);
-    console.log(extractedTitles, itemIds);
   };
 
-  // // ADD FUNCTION HERE
-  // private _updateListItems = (listIds: string[]): void => {
-  //   //this function I want to update the listitems in the context I am in (that document library)
-  //   //should use sharepoint rest APi
-  //   // the ids of the items that should be updated is the ones I send in
-  //   //I wanna update the version to the next major number (I have minor and major versions) when this code runs this version should be bumped.
-  //   //Say the current version is 2.2 when this code runs the version should become 3.0
-  //   console.log("hej");
-  // };
+  private _updateListItemMetadata = async (
+    itemIds: string[]
+  ): Promise<boolean> => {
+    for (const itemId of itemIds) {
+      const itemUrl = `${this.siteUrl}/_api/web/lists/getbytitle('${this.listTitle}')/items(${itemId})`;
+      const metadata = await this._getMetaDataType();
+      if (metadata === "") {
+        return false;
+      }
+      const payload = JSON.stringify({
+        "__metadata": {
+          "type": metadata,
+        },
+        "Status": strings.Publish,
+      });
 
-  // private _showPanel = (items: string[]) => {
-  //   this._renderPanelComponent({
-  //     isOpen: true,
-  //     items: items,
-  //     onDismiss: this._dismissPanel,
-  //   });
-  // };
+      const options = {
+        body: payload,
+        headers: {
+          "Accept": "application/json;odata=verbose",
+          "Content-Type": "application/json;odata=verbose",
+          "IF-MATCH": "*",
+          "X-HTTP-Method": "MERGE",
+          // "X-RequestDigest": await this._getRequestDigest(this.siteUrl),
+          "odata-version": "3.0",
+        },
+      };
 
-  // private _dismissPanel = () => {
-  //   this._renderPanelComponent({ isOpen: false });
-  // };
+      try {
+        const response: SPHttpClientResponse =
+          await this.context.spHttpClient.post(
+            itemUrl,
+            SPHttpClient.configurations.v1,
+            options
+          );
+        if (!response.ok) {
+          return false;
+        }
+      } catch (error) {
+        return false;
+      }
+    }
+    return true;
+  };
 
-  // private _renderPanelComponent = (props: any) => {
-  //   const element: React.ReactElement<IUpdateModal> = React.createElement(
-  //     UpdateModal,
-  //     {
-  //       onDismiss: this._dismissPanel,
-  //       // items: props.items,
-  //       isOpen: props.isOpen,
-  //       // listId: props.listId,
-  //       context: this.context,
-  //     },
-  //     props
-  //   );
-
-  //   ReactDom.render(element, this.panelPlaceHolder);
-  // };
-
-  private _updateListItems = async (listIds: string[]): Promise<void> => {
-    const siteUrl = "https://wmlps.sharepoint.com/sites/Notiser";
+  private _getMetaDataType = async (): Promise<string> => {
     try {
-      for (const id of listIds) {
-        const response = await axios.post(
-          `${siteUrl}/_api/web/lists/getbytitle('Publish to FileMaster')/items(${id})/File/CheckOut()`,
-          null,
-          {
-            headers: {
-              "X-HTTP-Method": "POST",
-              "If-Match": "*",
-              "X-RequestDigest": await this._getRequestDigest(siteUrl),
-              "Content-Type": "application/json;odata=verbose",
-            },
-          }
+      const itemUrl = `${this.siteUrl}/_api/web/lists/getbytitle('${this.listTitle}')?$select=ListItemEntityTypeFullName`;
+      const response: SPHttpClientResponse =
+        await this.context.spHttpClient.get(
+          itemUrl,
+          SPHttpClient.configurations.v1
         );
 
-        if (response.status === 200) {
-          // Successfully checked out the file
-          // Now update the metadata to increase the major version
-          const updateResponse = await axios.post(
-            `${siteUrl}/_api/web/lists/getbytitle('Publish to FileMaster')/items(${id})/File/CheckIn(checkintype=1)`,
-            null,
-            {
-              headers: {
-                "X-HTTP-Method": "POST",
-                "If-Match": "*",
-                "X-RequestDigest": await this._getRequestDigest(siteUrl),
-                "Content-Type": "application/json;odata=verbose",
-              },
-            }
-          );
-
-          if (updateResponse.status === 204) {
-            console.log(`Item with ID ${id} updated successfully.`);
-          } else {
-            console.error(`Failed to update item with ID ${id}.`);
-          }
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.ListItemEntityTypeFullName) {
+          return data.ListItemEntityTypeFullName;
         } else {
-          console.error(`Failed to check out item with ID ${id}.`);
+          return "";
         }
+      } else {
+        return "";
       }
     } catch (error) {
+      return "";
+    }
+  };
+
+  private _updateListItemVersions = async (
+    listIds: string[]
+  ): Promise<boolean> => {
+    const siteUrl = this.siteUrl;
+    try {
+      for (const id of listIds) {
+        const checkOutResponse = await this._checkOutItem(siteUrl, id);
+        if (checkOutResponse.status === 200) {
+          const checkInResponse = await this._checkInItem(siteUrl, id);
+          if (!checkInResponse.ok) {
+            return false;
+          }
+        } else {
+          return false;
+        }
+      }
+      return true;
+    } catch (error) {
       console.error("Error occurred while updating list items:", error);
+      return false;
+    }
+  };
+
+  private _checkOutItem = async (
+    siteUrl: string,
+    id: string
+  ): Promise<Response> => {
+    try {
+      const requestDigest = await this._getRequestDigest(siteUrl);
+      return await axios.post(
+        `${siteUrl}/_api/web/lists/getbytitle('${this.listTitle}')/items(${id})/File/CheckOut()`,
+        null,
+        {
+          headers: {
+            "X-HTTP-Method": "POST",
+            "If-Match": "*",
+            "X-RequestDigest": requestDigest,
+            "Content-Type": "application/json;odata=verbose",
+          },
+        }
+      );
+    } catch (error) {
+      console.error(`Error occurred while checking out item with ID ${id}:`);
+      throw error;
+    }
+  };
+
+  private _checkInItem = async (
+    siteUrl: string,
+    id: string
+  ): Promise<Response> => {
+    try {
+      const requestDigest = await this._getRequestDigest(siteUrl);
+      return await fetch(
+        `${siteUrl}/_api/web/lists/getbytitle('${this.listTitle}')/items('${id}')/File/CheckIn(comment='New version for FileMaster',checkintype=1)`,
+        {
+          method: "POST",
+          headers: {
+            "Accept": "application/json;odata=verbose",
+            "Content-Type": "application/json;odata=verbose",
+            "X-RequestDigest": requestDigest,
+            "IF-MATCH": "*",
+            "X-HTTP-Method": "MERGE",
+          },
+        }
+      );
+    } catch (error) {
+      console.error(`Error occurred while checking in item with ID ${id}:`);
+      throw error;
     }
   };
 
   private _getRequestDigest = async (siteUrl: string): Promise<string> => {
-    const response = await axios.post(`${siteUrl}/_api/contextinfo`, null, {
-      headers: {
-        "Accept": "application/json;odata=verbose",
-      },
-    });
-    return response.data.d.GetContextWebInformation.FormDigestValue;
+    try {
+      const response = await axios.post(`${siteUrl}/_api/contextinfo`, null, {
+        headers: {
+          "Accept": "application/json;odata=verbose",
+        },
+      });
+      return response.data.d.GetContextWebInformation.FormDigestValue;
+    } catch (error) {
+      console.error("Error occurred while getting request digest");
+      throw error;
+    }
   };
 
   private _onListViewStateChanged = (
